@@ -82,6 +82,12 @@ const AIAssistant: React.FC = () => {
 [ACTION] UPDATE_RESOURCE(resourceName: "resource name", newQuantity: number)
 - When asked to update all resources to the same quantity, respond ONLY with:
 [ACTION] UPDATE_ALL_RESOURCES(newQuantity: number)
+- When asked to add a resource, respond ONLY with:
+[ACTION] ADD_RESOURCE(resourceName: "resource name", quantity: number)
+- When asked to delete a resource, respond ONLY with:
+[ACTION] DELETE_RESOURCE(resourceName: "resource name")
+- When asked to delete all resources, respond ONLY with:
+[ACTION] DELETE_ALL_RESOURCES()
 Otherwise, answer normally.
 
 Active Disaster: ${activeDisaster?.name || activeDisaster?.type || 'None'}
@@ -96,6 +102,10 @@ User: ${userText}`;
     if (!activeDisaster) return null;
     const single = text.match(/UPDATE_RESOURCE\(resourceName:\s*"([^\"]+)",\s*newQuantity:\s*(\d+)\)/);
     const bulk = text.match(/UPDATE_ALL_RESOURCES\(newQuantity:\s*(\d+)\)/);
+    const addMatch = text.match(/ADD_RESOURCE\(resourceName:\s*"([^\"]+)",\s*quantity:\s*(\d+)\)/);
+    const delMatch = text.match(/DELETE_RESOURCE\(resourceName:\s*"([^\"]+)"\)/);
+    const delAllMatch = text.match(/DELETE_ALL_RESOURCES\(\)/);
+
     if (single) {
       const [, resourceName, qtyStr] = single;
       const qty = parseInt(qtyStr, 10);
@@ -114,6 +124,28 @@ User: ${userText}`;
       updateDisasterResources(activeDisaster.id, updated);
       return `Updated all resources to ${qty} for ${activeDisaster.name || activeDisaster.type}.`;
     }
+    if (addMatch) {
+      const [, resourceName, qtyStr] = addMatch;
+      const qty = parseInt(qtyStr, 10);
+      if (isNaN(qty)) return null;
+      const current = activeDisaster.resources || [];
+      const maxId = current.reduce((m, r) => (r.id > m ? r.id : m), 0);
+      const newRes = { id: maxId + 1, name: resourceName, quantity: qty, stock: qty, category: activeDisaster.type };
+      const updated = [...current, newRes];
+      updateDisasterResources(activeDisaster.id, updated);
+      return `Added resource ${resourceName} (${qty}).`;
+    }
+    if (delMatch) {
+      const [, resourceName] = delMatch;
+      const current = activeDisaster.resources || [];
+      const updated = current.filter((r) => r.name.toLowerCase() !== resourceName.toLowerCase());
+      updateDisasterResources(activeDisaster.id, updated);
+      return `Deleted resource ${resourceName}.`;
+    }
+    if (delAllMatch) {
+      updateDisasterResources(activeDisaster.id, []);
+      return `Deleted all resources for ${activeDisaster.name || activeDisaster.type}.`;
+    }
     return null;
   };
 
@@ -122,6 +154,11 @@ User: ${userText}`;
     if (!activeDisaster) return null;
     const allMatch = text.match(/(?:set|update)\s+(?:all|every)\s+resources\s+(?:to|at)\s+(\d+)/i);
     const singleMatch = text.match(/(?:set|update)\s+([a-zA-Z][\w\s-]+?)\s+(?:to|at)\s+(\d+)/i);
+    const delAll = text.match(/(?:delete|remove|clear)\s+(?:all\s+)?resources/i);
+    const delOne = text.match(/(?:delete|remove)\s+([a-zA-Z][\w\s-]+)/i);
+    const add1 = text.match(/add\s+(?:new\s+)?resource\s+([a-zA-Z][\w\s-]+)\s+(\d+)/i);
+    const add2 = text.match(/add\s+([a-zA-Z][\w\s-]+)\s+(\d+)/i);
+
     if (allMatch) {
       const qty = parseInt(allMatch[1], 10);
       if (isNaN(qty)) return null;
@@ -138,6 +175,29 @@ User: ${userText}`;
       );
       updateDisasterResources(activeDisaster.id, updated);
       return `Updated ${resourceName} to ${qty} for ${activeDisaster.name || activeDisaster.type}.`;
+    }
+    if (delAll) {
+      updateDisasterResources(activeDisaster.id, []);
+      return `Deleted all resources for ${activeDisaster.name || activeDisaster.type}.`;
+    }
+    if (delOne) {
+      const resourceName = delOne[1].trim();
+      if (resourceName.toLowerCase() === 'resources') return null;
+      const updated = (activeDisaster.resources || []).filter((r) => r.name.toLowerCase() !== resourceName.toLowerCase());
+      updateDisasterResources(activeDisaster.id, updated);
+      return `Deleted resource ${resourceName}.`;
+    }
+    if (add1 || add2) {
+      const match = add1 || add2;
+      const resourceName = match![1].trim();
+      const qty = parseInt(match![2], 10);
+      if (isNaN(qty)) return null;
+      const current = activeDisaster.resources || [];
+      const maxId = current.reduce((m, r) => (r.id > m ? r.id : m), 0);
+      const newRes = { id: maxId + 1, name: resourceName, quantity: qty, stock: qty, category: activeDisaster.type };
+      const updated = [...current, newRes];
+      updateDisasterResources(activeDisaster.id, updated);
+      return `Added resource ${resourceName} (${qty}).`;
     }
     return null;
   };
@@ -188,7 +248,7 @@ User: ${userText}`;
 
     // Call Gemini
     try {
-      const { text: aiText, usedModel } = await callGemini(text);
+      const { text: aiText } = await callGemini(text);
       // Try to execute actions from model
       const acted = maybeExecuteAction(aiText);
       if (acted) {
